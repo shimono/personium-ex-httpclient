@@ -29,8 +29,11 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
+import org.apache.commons.io.Charsets;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
+import org.apache.http.HttpEntityEnclosingRequest;
+import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
 import org.apache.http.ParseException;
 import org.apache.http.client.methods.HttpDelete;
@@ -40,8 +43,11 @@ import org.apache.http.client.methods.HttpPatch;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpRequestBase;
+import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.entity.BufferedHttpEntity;
 import org.apache.http.entity.ByteArrayEntity;
+import org.apache.http.entity.InputStreamEntity;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
@@ -145,7 +151,7 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
     @JSFunction
     public NativeObject get(String url, NativeObject headers, boolean respondsAsStream) {
         // Verification.
-        verifyParamIsEmpty(url, "url");
+        verifyParamIsNotEmpty(url, "url");
 
         HttpGet get = new HttpGet(url);
         addRequestHeaders(get, headers);
@@ -243,9 +249,9 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
         boolean respondsAsStream = false;
 
         // Verification.
-        verifyParamIsEmpty(url, "url");
-        verifyParamIsEmpty(contentType, "contentType");
-        verifyParamIsEmpty(params, "body");
+        verifyParamIsNotEmpty(url, "url");
+        verifyParamIsNotEmpty(contentType, "contentType");
+        verifyParamIsNotEmpty(params, "body");
 
         HttpPatch patch = new HttpPatch(url);
         // set contentType
@@ -275,7 +281,7 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
     @JSFunction
     public NativeObject delete(String url, NativeObject headers, boolean respondsAsStream) {
         // Verification.
-        verifyParamIsEmpty(url, "url");
+        verifyParamIsNotEmpty(url, "url");
 
         HttpDelete delete = new HttpDelete(url);
         addRequestHeaders(delete, headers);
@@ -288,6 +294,51 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
         } catch (IOException e) {
             throw ExtensionErrorConstructor.construct(createErrorMessage(e));
         }
+    }
+
+    public NativeObject request(NativeObject params) {
+        String method = (String) params.get("method");
+        String url = (String) params.get("url");
+        NativeObject headers = (NativeObject) params.get("headers");
+        Object body = params.get("body");
+        Boolean respondsAsStream = Boolean.valueOf(params.get("respondsAsStream"));
+        
+        // Verification.
+        verifyParamIsNotEmpty(url, "url");
+        
+        HttpUriRequest req = null;
+        if (body == null) {
+            req = new HttpRequestBase() {
+                @Override
+                public String getMethod() {
+                    return method;
+                }
+            };
+        } else {
+            HttpEntityEnclosingRequestBase eeReq = new HttpEntityEnclosingRequestBase() {
+                @Override
+                public String getMethod() {
+                    return method;
+                }
+            };
+            if (body instanceof PersoniumInputStream) {
+                eeReq.setEntity(new InputStreamEntity((InputStream)body));
+            } else if (body instanceof String) {
+                eeReq.setEntity(new StringEntity((String)body, Charsets.UTF_8));
+            }
+            req = eeReq;
+        }
+        addRequestHeaders(req, headers);
+        try (CloseableHttpClient httpclient = createHttpClient()) {
+            // Request
+            HttpResponse res = httpclient.execute(req);
+            // Response
+            return createResponseToJavascript(res, respondsAsStream);
+        } catch (IOException e) {
+            throw ExtensionErrorConstructor.construct(createErrorMessage(e));
+        }
+
+        return null;
     }
 
     /**
@@ -304,9 +355,9 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
         boolean respondsAsStream = false;
 
         // Verification.
-        verifyParamIsEmpty(url, "url");
-        verifyParamIsEmpty(contentType, "contentType");
-        verifyParamIsEmpty(bodyString, "body");
+        verifyParamIsNotEmpty(url, "url");
+        verifyParamIsNotEmpty(contentType, "contentType");
+        verifyParamIsNotEmpty(bodyString, "body");
 
         HttpPost post = new HttpPost(url);
         // set contentType
@@ -340,9 +391,9 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
         boolean respondsAsStream = false;
 
         // Verification.
-        verifyParamIsEmpty(url, "url");
-        verifyParamIsEmpty(contentType, "contentType");
-        verifyParamIsEmpty(bodyString, "body");
+        verifyParamIsNotEmpty(url, "url");
+        verifyParamIsNotEmpty(contentType, "contentType");
+        verifyParamIsNotEmpty(bodyString, "body");
 
         HttpPut put = new HttpPut(url);
         // set contentType
@@ -363,12 +414,12 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
     }
 
     /**
-     * Verify that the parameter is empty.
+     * Verify that the parameter is not empty.
      * If the parameter is empty throw exception.
      * @param param target parameter
      * @param paramName parameter name
      */
-    private void verifyParamIsEmpty(String param, String paramName) {
+    private void verifyParamIsNotEmpty(String param, String paramName) {
         if (TextUtils.isEmpty(param)) {
             String message = String.format("Parameter [%s] is not set.", paramName);
             this.getLogger().info(message);
@@ -382,7 +433,7 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
      * @param headers http headers
      * @return Request with header added
      */
-    private HttpRequestBase addRequestHeaders(HttpRequestBase request, NativeObject headers) {
+    private HttpRequest addRequestHeaders(HttpRequest request, NativeObject headers) {
         return addRequestHeaders(request, headers, null);
     }
 
@@ -393,7 +444,7 @@ public class Ext_HttpClient extends AbstractExtensionScriptableObject { // CHECK
      * @param contentType
      * @return Request with header added
      */
-    private HttpRequestBase addRequestHeaders(HttpRequestBase request, NativeObject headers, String contentType) {
+    private HttpRequest addRequestHeaders(HttpRequest request, NativeObject headers, String contentType) {
         // Set default headers.
         if (defaultHeaders != null) {
             for (@SuppressWarnings("rawtypes") Iterator iterator = defaultHeaders.keySet().iterator();
